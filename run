@@ -1,4 +1,6 @@
 #!/bin/bash
+set -x
+echo "Running run"
 echo "::: Container Started"
 pivpnFilesDir="/usr/local/src/pivpn"
 pivpnScriptDir="/opt/pivpn"
@@ -29,13 +31,14 @@ then
    cron &
    VPN=openvpn
    script
-   ln -sf "/etc/openvpn/ovpns/" "/home/pivpn/"
+   #ln -sf "/etc/openvpn/ovpns/" "/home/pivpn/"
+   ln -sf "/home/pivpn/ovpns/" "/etc/openvpn/"
    pivpn -a -n ${CLIENT_NAME:=pivpn} nopass -d 1080 > /dev/null
    groupadd openvpn 2> /dev/null   
    useradd -g openvpn openvpn 2> /dev/null   
    echo "::: Openvpn PiVPN Service Started"
    sudo iptables --table nat -A POSTROUTING -o "${INTERFACE:=eth0}" -j MASQUERADE
-   openvpn --config /etc/openvpn/server.conf --log /etc/openvpn/openvpn.log
+   openvpn --config /etc/openvpn/server.conf --log /etc/openvpn/openvpn.log --verb 4
 elif [ -f /etc/wireguard/wg0.conf ]
 then
    cron &

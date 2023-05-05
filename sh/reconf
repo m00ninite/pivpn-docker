@@ -1,5 +1,6 @@
 #!/bin/bash
-
+set -x
+echo "Running sh/reconf"
 echo "::: Pre Config of PIVPN."
 apt update > /dev/null 2> /dev/null
 pivpnFilesDir="/usr/local/src/pivpn"
@@ -11,7 +12,49 @@ script(){
    ln -sf -T "${pivpnFilesDir}/scripts/${VPN}/bash-completion" /etc/bash_completion.d/pivpn
    ln -sf -T "${pivpnFilesDir}/scripts/${VPN}/pivpn.sh" /usr/local/bin/pivpn
    ln -sf "${pivpnFilesDir}/scripts/" "${pivpnScriptDir}"
+
+   if [ -f "${SCRIPT_FILE:=/etc/${VPN}/script.sh}" ]; then
+       if "${SUDO_SCRIPT:=false}"; then
+         sudo bash ${SCRIPT_FILE:=/etc/${VPN}/script.sh}
+       else
+         bash ${SCRIPT_FILE:=/etc/${VPN}/script.sh}
+       fi
+   else
+       echo "${SCRIPT_FILE:=/etc/${VPN}/script.sh} does not exist."
+   fi
+
 }
+
+install(){
+	/bin/bash "${INSTALLER}" --unattended /etc/pivpn/setupVars.conf --reconfigure
+	echo "::: Installation Complete!"
+	cron &
+	echo "::: PiVPN Service Started"
+	if [ -f /etc/wireguard/wg0.conf ]
+	then
+	   VPN=wireguard
+	   script
+	   mkdir /etc/openvpn/ovpns/
+	   ln -sf "/etc/openvpn/ovpns/" "/home/pivpn/"
+	   sudo iptables --table nat -A POSTROUTING -o "${INTERFACE:=eth0}" -j MASQUERADE
+	   pivpn -a -n ${CLIENT_NAME:=pivpn} > /dev/null 2> /dev/null
+	   wg-quick up wg0 2>> /etc/wireguard/start.log
+	   while :;do sleep 3; done
+	elif [ -f /etc/openvpn/server.conf ]
+	then
+	   VPN=openvpn
+	   script
+	   #systemctl enable openvpn > /dev/null#
+	   mkdir /etc/wireguard/configs/
+	   ln -sf "/etc/wireguard/configs/" "/home/pivpn/"
+	   pivpn -a nopass -n ${CLIENT_NAME:=pivpn} -d 1080 > /dev/null 2> /dev/null
+	   sleep 1
+	   openvpn --config /etc/openvpn/server.conf --log /etc/openvpn/openvpn.log
+	else
+	   return 1
+	fi
+}
+
 echo "::: installing PIVPN"
 mkdir -p /etc/pivpn
 sudo -E bash setupVars
@@ -27,34 +70,18 @@ sed -i 's/PIVPN_DEPS+=(linux-headers-amd64 wireguard-dkms)/sleep 1/g' "${INSTALL
 sed -i 's/PIVPN_DEPS+=(linux-headers-generic wireguard-dkms)/sleep 1/g' "${INSTALLER}"
 sed -i 's/sync/# sync/g' "${INSTALLER}"
 chmod +x "${INSTALLER}"
-if [ "${LOG:=0}" -eq 0 ]
+
+install
+retval=$?
+if [ "$retval" == 1 ]
 then
-   sudo -E bash listconf
-   bash "${INSTALLER}" --unattended /etc/pivpn/setupVars.conf --reconfigure > /tmp/pivpn.log 2> /tmp/pivpn.log
-else
-   bash "${INSTALLER}" --unattended /etc/pivpn/setupVars.conf --reconfigure
+    echo "install failed, trying again"
+    install
+    retval=$?
+    if [ "$retval" == 1 ]
+    then
+      echo "install failed twice. Sleeping for a long time. connect to this container to debug using docker exec -it \$(docker ps -a | awk '/pivpn*/ {print \$1}') /bin/bash "
+      sleep 100000
+    fi
 fi
-echo "::: Installation Complete!"
-cron &
-echo "::: PiVPN Service Started"
-if [ -f /etc/wireguard/wg0.conf ]
-then
-   VPN=wireguard
-   script
-   mkdir /etc/openvpn/ovpns/
-   ln -sf "/etc/openvpn/ovpns/" "/home/pivpn/"
-   sudo iptables --table nat -A POSTROUTING -o "${INTERFACE:=eth0}" -j MASQUERADE
-   pivpn -a -n ${CLIENT_NAME:=pivpn} > /dev/null 2> /dev/null
-   wg-quick up wg0 2>> /etc/wireguard/start.log
-   while :;do sleep 3; done
-elif [ -f /etc/openvpn/server.conf ]
-then
-   VPN=openvpn
-   script
-   #systemctl enable openvpn > /dev/null#
-   mkdir /etc/wireguard/configs/
-   ln -sf "/etc/wireguard/configs/" "/home/pivpn/"
-   pivpn -a nopass -n ${CLIENT_NAME:=pivpn} -d 1080 > /dev/null 2> /dev/null
-   sleep 1
-   openvpn --config /etc/openvpn/server.conf --log /etc/openvpn/openvpn.log
-fi
+

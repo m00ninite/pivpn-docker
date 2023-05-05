@@ -1,5 +1,6 @@
 #!/bin/bash
-
+set -x 
+echo "Running dev/sh/reconf"
 echo "::: Pre Config of PIVPN."
 apt update > /dev/null 2> /dev/null
 pivpnFilesDir="/usr/local/src/pivpn"
